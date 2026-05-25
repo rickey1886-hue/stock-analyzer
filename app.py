@@ -127,13 +127,21 @@ if run:
 
     st.subheader("分析サマリー")
     s1, s2, s3, s4, s5, s6 = st.columns(6)
+    short_horizon = horizons.get("短期", {})
+    mid_horizon = horizons.get("中期", {})
+    long_horizon = horizons.get("長期", {})
+
+    short_view = short_horizon.get("view", "データ未取得")
+    mid_view = mid_horizon.get("view", "データ未取得")
+    long_view = long_horizon.get("view", "データ未取得")
+
     cards = [
         ("総合判定", f"<span class='{judgment_class(judgment)}'>{judgment}</span>"),
         ("総合スコア", f"{score} / 100"),
         ("直近終値", format_number(stats["latest_close"], 2)),
-        ("短期判定", f"<span class='{judgment_class(horizons['short']['view'])}'>{horizons['short']['view']}</span>"),
-        ("中期判定", f"<span class='{judgment_class(horizons['mid']['view'])}'>{horizons['mid']['view']}</span>"),
-        ("長期判定", f"<span class='{judgment_class(horizons['long']['view'])}'>{horizons['long']['view']}</span>"),
+        ("短期判定", f"<span class='{judgment_class(short_view)}'>{short_view}</span>"),
+        ("中期判定", f"<span class='{judgment_class(mid_view)}'>{mid_view}</span>"),
+        ("長期判定", f"<span class='{judgment_class(long_view)}'>{long_view}</span>"),
     ]
     for col, (title, value) in zip([s1, s2, s3, s4, s5, s6], cards):
         col.markdown(
@@ -228,9 +236,12 @@ if run:
         st.subheader("短期・中期・長期の分析補助")
         horizon_rows = []
         for term, data in horizons.items():
-            buy_text = "、".join(data["buy"]) if data["buy"] else "データ未取得"
-            caution_text = "、".join(data["caution"]) if data["caution"] else "データ未取得"
-            horizon_rows.append({"期間": term, "判定": data["view"], "買い材料": buy_text, "売り材料 / 注意材料": caution_text})
+            buy_items = data.get("buy", [])
+            caution_items = data.get("caution", [])
+            view = data.get("view", "データ未取得")
+            buy_text = "、".join(buy_items) if buy_items else "データ未取得"
+            caution_text = "、".join(caution_items) if caution_items else "データ未取得"
+            horizon_rows.append({"期間": term, "判定": view, "買い材料": buy_text, "売り材料 / 注意材料": caution_text})
         st.dataframe(pd.DataFrame(horizon_rows), use_container_width=True)
 
     with tab_reason:
