@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import pandas as pd
 import yfinance as yf
 
@@ -39,7 +40,12 @@ def _calc_return(close: pd.Series | None) -> float | None:
     if first in (None, 0):
         return None
     try:
-        return (float(last) / float(first)) - 1.0
+        first_f = float(first)
+        last_f = float(last)
+        if not math.isfinite(first_f) or not math.isfinite(last_f) or first_f == 0:
+            return None
+        result = (last_f / first_f) - 1.0
+        return result if math.isfinite(result) else None
     except (TypeError, ValueError, ZeroDivisionError):
         return None
 
@@ -50,7 +56,13 @@ def get_market_environment(period: str) -> dict:
 
     for name, symbol in MARKET_SYMBOLS:
         close = _download_close_series(symbol, period)
-        latest = float(close.iloc[-1]) if close is not None else None
+        latest = None
+        if close is not None:
+            try:
+                latest_value = float(close.iloc[-1])
+                latest = latest_value if math.isfinite(latest_value) else None
+            except (TypeError, ValueError):
+                latest = None
         change_rate = _calc_return(close)
         market_rows.append(
             {
