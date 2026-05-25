@@ -8,6 +8,7 @@ from src.analysis.scoring import calculate_phase1_score, judgment_from_score
 from src.analysis.technical_analysis import add_technical_indicators
 from src.analysis.valuation_analysis import valuation_comment
 from src.data.fundamental_data import get_fundamental_snapshot
+from src.data.market_data import compare_with_market, get_market_indices
 from src.data.price_data import get_latest_price_stats, get_price_history
 from src.utils.config import PERIOD_OPTIONS
 from src.utils.formatting import format_number, format_percent
@@ -42,13 +43,19 @@ if run:
             fund = {}
             st.warning(f"ファンダメンタル取得エラー: {e}")
 
+        try:
+            market_rows, market_missing = get_market_indices(PERIOD_OPTIONS[period_label])
+        except Exception:
+            market_rows, market_missing = {}, []
+
     if price_df.empty:
         st.error("株価データが取得できませんでした。")
         st.stop()
 
-    score, breakdown, reasons, risks = calculate_phase1_score(price_df, fund)
+    score, breakdown, horizons, buy_factors, caution_factors, _, summary_comment = calculate_phase1_score(price_df, fund)
     judgment = judgment_from_score(score)
     stats = get_latest_price_stats(price_df)
+    market_comparison_rows, market_comment, market_meta = compare_with_market(ticker, price_df, market_rows)
 
     col1, col2, col3 = st.columns(3)
     col1.metric("総合判定", judgment)
@@ -89,34 +96,89 @@ if run:
     }
     st.dataframe(pd.DataFrame(fundamental_rows.items(), columns=["項目", "値"]), use_container_width=True)
 
-    st.subheader("簡易スコア内訳")
-    st.dataframe(pd.DataFrame(breakdown.items(), columns=["カテゴリ", "スコア(100点満点)"]), use_container_width=True)
+    st.subheader("スコア内訳")
+    breakdown_rows = [{"カテゴリ": k, "スコア(100点満点)": v["score"], "コメント": v["comment"]} for k, v in breakdown.items()]
+    market_score_display = market_meta.get("score") if isinstance(market_meta.get("score"), int) else "データ未取得"
+    breakdown_rows.append({"カテゴリ": "市場環境スコア", "スコア(100点満点)": market_score_display, "コメント": market_meta.get("comment", "データ未取得")})
+    st.dataframe(pd.DataFrame(breakdown_rows), use_container_width=True)
+
+    st.subheader("市場環境（Phase 2-1 / Phase 2-2）")
+    market_table_rows = []
+    for name, row in market_rows.items():
+        market_table_rows.append({
+            "指数": name,
+            "ティッカー": row.get("ticker"),
+            "終値": format_number(row.get("latest"), 2),
+            "期間騰落率": format_percent(row.get("change_pct"), 2),
+            "取得状況": row.get("status", "データ未取得"),
+        })
+    st.markdown("**市場指数一覧テーブル**")
+    st.dataframe(pd.DataFrame(market_table_rows), use_container_width=True)
+
+    comp_rows = []
+    for r in market_comparison_rows:
+        comp_rows.append({
+            "比較対象": r["比較対象"],
+            "個別株騰落率": format_percent(r["個別株騰落率"], 2),
+            "指数騰落率": format_percent(r["指数騰落率"], 2),
+            "比較": r["比較"],
+            "コメント": r["コメント"],
+        })
+    st.markdown("**個別株 vs 市場指数の騰落率比較**")
+    st.dataframe(pd.DataFrame(comp_rows), use_container_width=True)
+
+    st.markdown("**市場環境コメント**")
+    st.write(market_comment)
+
+    st.markdown("**データ取得状況**")
+    st.markdown(f"- 対象市場: {market_meta.get('対象市場', 'データ未取得')}")
+    st.markdown(f"- 比較対象: {market_meta.get('比較対象', 'データ未取得')}")
+    if market_missing:
+        st.markdown(f"- 未取得指数: {'、'.join(market_missing)}")
+    else:
+        st.markdown("- 未取得指数: なし")
+
+    st.subheader("短期・中期・長期の分析補助")
+    horizon_rows = []
+    for term, data in horizons.items():
+        buy_text = "、".join(data["buy"]) if data["buy"] else "データ未取得"
+        caution_text = "、".join(data["caution"]) if data["caution"] else "データ未取得"
+        horizon_rows.append({"期間": term, "判定": data["view"], "買い材料": buy_text, "売り材料 / 注意材料": caution_text})
+    st.dataframe(pd.DataFrame(horizon_rows), use_container_width=True)
 
     st.subheader("判定理由")
     st.markdown("**取得データ**")
     st.markdown(f"- バリュエーション: {valuation_comment(fund.get('per'), fund.get('pbr'), fund.get('psr'))}")
     st.markdown(f"- 財務サマリー: {build_fundamental_summary(fund)}")
 
-    st.markdown("**計算データ**")
-    if reasons:
-        for r in reasons:
-            st.markdown(f"- {r}")
+    st.markdown("**買い材料**")
+    if buy_factors:
+        for item in buy_factors:
+            st.markdown(f"- {item}")
+    else:
+        st.markdown("- データ未取得")
+
+    st.markdown("**売り材料 / 注意材料**")
+    if caution_factors:
+        for item in caution_factors:
+            st.markdown(f"- {item}")
     else:
         st.markdown("- データ未取得")
 
     st.markdown("**AIによる解釈（ルールベース）**")
-    stance = "短期テクニカルと財務のバランスを踏まえた補助的判定です。"
-    st.write(f"総合判定は **{judgment}**。{stance}")
+    st.write(summary_comment)
 
     st.subheader("リスク要因")
-    if risks:
-        for risk in risks:
+    if caution_factors:
+        for risk in caution_factors:
             st.markdown(f"- {risk}")
     else:
         st.markdown("- 特記事項なし")
 
     st.subheader("データ未取得項目一覧")
     missing = [k for k, v in fundamental_rows.items() if v == "データ未取得"]
+    if market_missing:
+        missing.extend([f"市場指数: {name}" for name in market_missing])
     if missing:
         for item in missing:
             st.markdown(f"- {item}: データ未取得")
