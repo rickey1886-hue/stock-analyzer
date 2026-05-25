@@ -11,7 +11,7 @@ from src.data.fundamental_data import get_fundamental_snapshot
 from src.data.market_data import get_market_environment
 from src.data.price_data import get_latest_price_stats, get_price_history
 from src.utils.config import PERIOD_OPTIONS
-from src.utils.formatting import format_number, format_percent
+from src.utils.formatting import format_number, format_percent, is_valid_number
 from src.utils.ticker_utils import normalize_ticker
 
 st.set_page_config(page_title="Stock Analyzer", layout="wide")
@@ -55,20 +55,31 @@ if run:
         market_env = get_market_environment(PERIOD_OPTIONS[period_label])
 
     stock_return = None
-    if len(price_df) >= 2 and price_df["Close"].iloc[0] not in (None, 0):
-        stock_return = (float(price_df["Close"].iloc[-1]) / float(price_df["Close"].iloc[0])) - 1.0
+    if len(price_df) >= 2:
+        first_close = price_df["Close"].iloc[0]
+        last_close = price_df["Close"].iloc[-1]
+        if is_valid_number(first_close, allow_zero=False) and is_valid_number(last_close):
+            stock_return = (float(last_close) / float(first_close)) - 1.0
 
     comparison_rows = []
     market_score, market_comment = calculate_market_environment_score(market_env["market_returns"])
     for idx_name, idx_return in market_env["market_returns"].items():
-        if stock_return is None or idx_return is None:
+        diff = None
+        if not is_valid_number(stock_return) or not is_valid_number(idx_return):
             relative = "データ未取得"
         else:
-            relative = "上回る" if stock_return > idx_return else "下回る"
+            diff = stock_return - idx_return
+            if diff >= 0.02:
+                relative = "上回る"
+            elif diff <= -0.02:
+                relative = "下回る"
+            else:
+                relative = "ほぼ同等"
         comparison_rows.append({
             "比較対象": idx_name,
             "個別株騰落率": stock_return,
             "指数騰落率": idx_return,
+            "差分": diff,
             "相対強弱": relative,
         })
 
@@ -130,6 +141,7 @@ if run:
     comparison_df = pd.DataFrame(comparison_rows)
     comparison_df["個別株騰落率"] = comparison_df["個別株騰落率"].apply(lambda v: format_percent(v, 2))
     comparison_df["指数騰落率"] = comparison_df["指数騰落率"].apply(lambda v: format_percent(v, 2))
+    comparison_df["差分"] = comparison_df["差分"].apply(lambda v: format_percent(v, 2))
     st.dataframe(comparison_df, use_container_width=True)
 
     st.markdown("**市場環境コメント**")
@@ -137,13 +149,16 @@ if run:
         st.write("個別株騰落率が算出できないため比較コメントはデータ未取得")
     else:
         outperform_count = sum(1 for row in comparison_rows if row["相対強弱"] == "上回る")
-        valid_count = sum(1 for row in comparison_rows if row["相対強弱"] in ["上回る", "下回る"])
+        valid_count = sum(1 for row in comparison_rows if row["相対強弱"] in ["上回る", "下回る", "ほぼ同等"])
+        underperform_count = sum(1 for row in comparison_rows if row["相対強弱"] == "下回る")
         if valid_count == 0:
             st.write("市場指数比較データ未取得")
-        elif outperform_count >= valid_count / 2:
-            st.write(f"{ticker}は主要指数比で相対的に強く推移。{market_comment}。")
+        elif outperform_count > valid_count / 2:
+            st.write(f"{ticker}は主要指数比で相対的に強い。{market_comment}。")
+        elif underperform_count > valid_count / 2:
+            st.write(f"{ticker}は指数比では見劣り。{market_comment}。")
         else:
-            st.write(f"{ticker}は主要指数比で相対的に弱め。{market_comment}。")
+            st.write(f"{ticker}は主要指数比でほぼ同等。{market_comment}。")
 
     st.subheader("スコア内訳")
     breakdown_rows = [{"カテゴリ": k, "スコア(100点満点)": v["score"], "コメント": v["comment"]} for k, v in breakdown.items()]
