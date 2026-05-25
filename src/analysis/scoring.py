@@ -195,3 +195,20 @@ def judgment_from_score(score: int) -> str:
     if score >= SCORING_THRESHOLDS["neutral"]:
         return "中立"
     return "売り寄り"
+
+
+
+def calculate_market_environment_score(market_returns: dict) -> tuple[int, str]:
+    benchmark_keys = ["S&P500", "NASDAQ", "日経平均", "TOPIX"]
+    available = [market_returns.get(k) for k in benchmark_keys if market_returns.get(k) is not None]
+    if not available:
+        return 50, "市場指数データ未取得のため補助スコアは中立"
+
+    avg_return = sum(available) / len(available)
+    if avg_return >= 0.08:
+        return 60, "市場全体は強含み（追い風）"
+    if avg_return >= 0.0:
+        return 55, "市場全体はやや堅調"
+    if avg_return <= -0.08:
+        return 40, "市場全体は軟調（逆風）"
+    return 45, "市場全体はやや弱含み"

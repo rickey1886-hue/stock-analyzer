@@ -4,10 +4,11 @@ import streamlit as st
 from plotly.subplots import make_subplots
 
 from src.analysis.fundamental_analysis import build_fundamental_summary
-from src.analysis.scoring import calculate_phase1_score, judgment_from_score
+from src.analysis.scoring import calculate_market_environment_score, calculate_phase1_score, judgment_from_score
 from src.analysis.technical_analysis import add_technical_indicators
 from src.analysis.valuation_analysis import valuation_comment
 from src.data.fundamental_data import get_fundamental_snapshot
+from src.data.market_data import get_market_environment
 from src.data.price_data import get_latest_price_stats, get_price_history
 from src.utils.config import PERIOD_OPTIONS
 from src.utils.formatting import format_number, format_percent
@@ -50,6 +51,43 @@ if run:
     judgment = judgment_from_score(score)
     stats = get_latest_price_stats(price_df)
 
+    with st.spinner("市場環境を取得中..."):
+        market_env = get_market_environment(PERIOD_OPTIONS[period_label])
+
+    stock_return = None
+    if len(price_df) >= 2 and price_df["Close"].iloc[0] not in (None, 0):
+        stock_return = (float(price_df["Close"].iloc[-1]) / float(price_df["Close"].iloc[0])) - 1.0
+
+    comparison_rows = []
+    market_score, market_comment = calculate_market_environment_score(market_env["market_returns"])
+    for idx_name, idx_return in market_env["market_returns"].items():
+        diff = None
+        if stock_return is None or idx_return is None:
+            relative = "データ未取得"
+        else:
+            diff = stock_return - idx_return
+            if diff >= 0.02:
+                relative = "上回る"
+            elif diff <= -0.02:
+                relative = "下回る"
+            else:
+                relative = "ほぼ同等"
+        comparison_rows.append({
+            "比較対象": idx_name,
+            "個別株騰落率": stock_return,
+            "指数騰落率": idx_return,
+            "差分": diff,
+            "相対強弱": relative,
+        })
+
+    if stock_return is not None:
+        score += int((market_score - 50) * 0.2)
+        score = max(0, min(100, score))
+        breakdown["市場環境"] = {
+            "score": market_score,
+            "comment": f"補助情報（総合スコアへの反映は限定的）: {market_comment}",
+        }
+
     col1, col2, col3 = st.columns(3)
     col1.metric("総合判定", judgment)
     col2.metric("総合スコア", f"{score} / 100")
@@ -88,6 +126,42 @@ if run:
         "直近安値": format_number(stats.get("recent_low"), 2),
     }
     st.dataframe(pd.DataFrame(fundamental_rows.items(), columns=["項目", "値"]), use_container_width=True)
+
+    st.subheader("市場環境")
+    market_table = pd.DataFrame(market_env["market_rows"])
+    market_table["終値"] = market_table["終値"].apply(lambda v: format_number(v, 2))
+    market_table["期間騰落率"] = market_table["期間騰落率"].apply(lambda v: format_percent(v, 2))
+    st.markdown("**市場指数一覧**")
+    st.dataframe(market_table, use_container_width=True)
+
+    st.markdown("**個別株 vs 市場指数（選択期間）**")
+    comparison_df = pd.DataFrame(comparison_rows)
+    comparison_df["個別株騰落率"] = comparison_df["個別株騰落率"].apply(lambda v: format_percent(v, 2))
+    comparison_df["指数騰落率"] = comparison_df["指数騰落率"].apply(lambda v: format_percent(v, 2))
+    comparison_df["差分"] = comparison_df["差分"].apply(lambda v: format_percent(v, 2))
+    st.dataframe(comparison_df, use_container_width=True)
+
+    st.markdown("**市場環境コメント**")
+    if stock_return is None:
+        st.write("個別株騰落率が算出できないため比較コメントはデータ未取得")
+    else:
+        major_indices = {"S&P500", "NASDAQ", "日経平均", "TOPIX"}
+        major_rows = [row for row in comparison_rows if row["比較対象"] in major_indices and row["相対強弱"] != "データ未取得"]
+        if not major_rows:
+            st.write("主要指数比較データ未取得")
+        else:
+            outperform_count = sum(1 for row in major_rows if row["相対強弱"] == "上回る")
+            underperform_count = sum(1 for row in major_rows if row["相対強弱"] == "下回る")
+            valid_count = len(major_rows)
+
+            if outperform_count > valid_count / 2:
+                strength_comment = "指数比では相対的に強い"
+            elif underperform_count > valid_count / 2:
+                strength_comment = "指数比では見劣り"
+            else:
+                strength_comment = "指数比では強弱まちまち"
+
+            st.write(f"{ticker}は{strength_comment}。{market_comment}。")
 
     st.subheader("スコア内訳")
     breakdown_rows = [{"カテゴリ": k, "スコア(100点満点)": v["score"], "コメント": v["comment"]} for k, v in breakdown.items()]
