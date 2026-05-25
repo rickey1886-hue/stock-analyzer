@@ -77,6 +77,10 @@ if run:
     score, breakdown, horizons, buy_factors, caution_factors, _, summary_comment = calculate_phase1_score(price_df, fund)
     judgment = judgment_from_score(score)
     stats = get_latest_price_stats(price_df)
+    close_series = price_df["Close"].dropna() if "Close" in price_df.columns else pd.Series(dtype=float)
+    latest_close = stats.get("latest_close")
+    if not is_valid_number(latest_close) and not close_series.empty:
+        latest_close = float(close_series.iloc[-1])
 
     with st.spinner("市場環境を取得中..."):
         market_env = get_market_environment(PERIOD_OPTIONS[period_label])
@@ -127,13 +131,29 @@ if run:
 
     st.subheader("分析サマリー")
     s1, s2, s3, s4, s5, s6 = st.columns(6)
+    def resolve_horizon_view(data: dict, default_key: str, fallback_keys: list[str]) -> dict:
+        if isinstance(data.get(default_key), dict):
+            return data[default_key]
+        for key in fallback_keys:
+            if isinstance(data.get(key), dict):
+                return data[key]
+        return {}
+
+    short_horizon = resolve_horizon_view(horizons, "短期", ["short"])
+    mid_horizon = resolve_horizon_view(horizons, "中期", ["mid", "medium"])
+    long_horizon = resolve_horizon_view(horizons, "長期", ["long"])
+
+    short_view = short_horizon.get("view", "データ未取得")
+    mid_view = mid_horizon.get("view", "データ未取得")
+    long_view = long_horizon.get("view", "データ未取得")
+
     cards = [
         ("総合判定", f"<span class='{judgment_class(judgment)}'>{judgment}</span>"),
         ("総合スコア", f"{score} / 100"),
-        ("直近終値", format_number(stats["latest_close"], 2)),
-        ("短期判定", f"<span class='{judgment_class(horizons['short']['view'])}'>{horizons['short']['view']}</span>"),
-        ("中期判定", f"<span class='{judgment_class(horizons['mid']['view'])}'>{horizons['mid']['view']}</span>"),
-        ("長期判定", f"<span class='{judgment_class(horizons['long']['view'])}'>{horizons['long']['view']}</span>"),
+        ("直近終値", format_number(latest_close, 2)),
+        ("短期判定", f"<span class='{judgment_class(short_view)}'>{short_view}</span>"),
+        ("中期判定", f"<span class='{judgment_class(mid_view)}'>{mid_view}</span>"),
+        ("長期判定", f"<span class='{judgment_class(long_view)}'>{long_view}</span>"),
     ]
     for col, (title, value) in zip([s1, s2, s3, s4, s5, s6], cards):
         col.markdown(
@@ -227,10 +247,18 @@ if run:
 
         st.subheader("短期・中期・長期の分析補助")
         horizon_rows = []
-        for term, data in horizons.items():
-            buy_text = "、".join(data["buy"]) if data["buy"] else "データ未取得"
-            caution_text = "、".join(data["caution"]) if data["caution"] else "データ未取得"
-            horizon_rows.append({"期間": term, "判定": data["view"], "買い材料": buy_text, "売り材料 / 注意材料": caution_text})
+        display_horizons = {
+            "短期": short_horizon,
+            "中期": mid_horizon,
+            "長期": long_horizon,
+        }
+        for term, data in display_horizons.items():
+            buy_items = data.get("buy", []) if isinstance(data, dict) else []
+            caution_items = data.get("caution", []) if isinstance(data, dict) else []
+            view = data.get("view", "データ未取得") if isinstance(data, dict) else "データ未取得"
+            buy_text = "、".join(buy_items) if buy_items else "データ未取得"
+            caution_text = "、".join(caution_items) if caution_items else "データ未取得"
+            horizon_rows.append({"期間": term, "判定": view, "買い材料": buy_text, "売り材料 / 注意材料": caution_text})
         st.dataframe(pd.DataFrame(horizon_rows), use_container_width=True)
 
     with tab_reason:
