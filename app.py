@@ -46,7 +46,7 @@ if run:
         st.error("株価データが取得できませんでした。")
         st.stop()
 
-    score, breakdown, reasons, risks = calculate_phase1_score(price_df, fund)
+    score, breakdown, horizons, buy_factors, caution_factors, _, summary_comment = calculate_phase1_score(price_df, fund)
     judgment = judgment_from_score(score)
     stats = get_latest_price_stats(price_df)
 
@@ -89,28 +89,43 @@ if run:
     }
     st.dataframe(pd.DataFrame(fundamental_rows.items(), columns=["項目", "値"]), use_container_width=True)
 
-    st.subheader("簡易スコア内訳")
-    st.dataframe(pd.DataFrame(breakdown.items(), columns=["カテゴリ", "スコア(100点満点)"]), use_container_width=True)
+    st.subheader("スコア内訳")
+    breakdown_rows = [{"カテゴリ": k, "スコア(100点満点)": v["score"], "コメント": v["comment"]} for k, v in breakdown.items()]
+    st.dataframe(pd.DataFrame(breakdown_rows), use_container_width=True)
+
+    st.subheader("短期・中期・長期の分析補助")
+    horizon_rows = []
+    for term, data in horizons.items():
+        buy_text = "、".join(data["buy"]) if data["buy"] else "データ未取得"
+        caution_text = "、".join(data["caution"]) if data["caution"] else "データ未取得"
+        horizon_rows.append({"期間": term, "判定": data["view"], "買い材料": buy_text, "売り材料 / 注意材料": caution_text})
+    st.dataframe(pd.DataFrame(horizon_rows), use_container_width=True)
 
     st.subheader("判定理由")
     st.markdown("**取得データ**")
     st.markdown(f"- バリュエーション: {valuation_comment(fund.get('per'), fund.get('pbr'), fund.get('psr'))}")
     st.markdown(f"- 財務サマリー: {build_fundamental_summary(fund)}")
 
-    st.markdown("**計算データ**")
-    if reasons:
-        for r in reasons:
-            st.markdown(f"- {r}")
+    st.markdown("**買い材料**")
+    if buy_factors:
+        for item in buy_factors:
+            st.markdown(f"- {item}")
+    else:
+        st.markdown("- データ未取得")
+
+    st.markdown("**売り材料 / 注意材料**")
+    if caution_factors:
+        for item in caution_factors:
+            st.markdown(f"- {item}")
     else:
         st.markdown("- データ未取得")
 
     st.markdown("**AIによる解釈（ルールベース）**")
-    stance = "短期テクニカルと財務のバランスを踏まえた補助的判定です。"
-    st.write(f"総合判定は **{judgment}**。{stance}")
+    st.write(summary_comment)
 
     st.subheader("リスク要因")
-    if risks:
-        for risk in risks:
+    if caution_factors:
+        for risk in caution_factors:
             st.markdown(f"- {risk}")
     else:
         st.markdown("- 特記事項なし")
