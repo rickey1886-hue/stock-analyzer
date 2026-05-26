@@ -132,13 +132,23 @@ if run:
     long_horizon = horizons.get("長期", {})
 
     short_view = short_horizon.get("view", "データ未取得")
+    if short_view == "データ未取得":
+        short_view = "判定材料不足"
     mid_view = mid_horizon.get("view", "データ未取得")
     long_view = long_horizon.get("view", "データ未取得")
+
+    latest_close = stats.get("latest_close")
+    if not is_valid_number(latest_close):
+        close_series = price_df.get("Close")
+        if close_series is not None:
+            valid_close = close_series.dropna()
+            if not valid_close.empty:
+                latest_close = float(valid_close.iloc[-1])
 
     cards = [
         ("総合判定", f"<span class='{judgment_class(judgment)}'>{judgment}</span>"),
         ("総合スコア", f"{score} / 100"),
-        ("直近終値", format_number(stats["latest_close"], 2)),
+        ("直近終値", format_number(latest_close, 2)),
         ("短期判定", f"<span class='{judgment_class(short_view)}'>{short_view}</span>"),
         ("中期判定", f"<span class='{judgment_class(mid_view)}'>{mid_view}</span>"),
         ("長期判定", f"<span class='{judgment_class(long_view)}'>{long_view}</span>"),
