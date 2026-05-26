@@ -190,11 +190,19 @@ def calculate_phase1_score(df, fund: dict) -> tuple[int, dict, dict, list[str], 
 
 
 def judgment_from_score(score: int) -> str:
-    if score >= SCORING_THRESHOLDS["buy"]:
+    if score >= 80:
+        return "強い買い寄り"
+    if score >= 65:
         return "買い寄り"
-    if score >= SCORING_THRESHOLDS["neutral"]:
+    if score >= 55:
+        return "中立〜やや買い寄り"
+    if score >= 45:
         return "中立"
-    return "売り寄り"
+    if score >= 35:
+        return "中立〜やや売り寄り"
+    if score >= 20:
+        return "売り寄り"
+    return "強い売り寄り"
 
 
 
