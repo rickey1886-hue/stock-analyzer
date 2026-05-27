@@ -15,7 +15,8 @@ from src.utils.formatting import format_number, format_percent, is_valid_number
 from src.utils.ticker_utils import normalize_ticker
 
 st.set_page_config(page_title="Stock Analyzer", layout="wide")
-st.title("株式投資分析ツール（Phase 1 MVP）")
+st.title("株式投資分析ダッシュボード")
+st.caption("株価・テクニカル・ファンダメンタル・市場環境をもとに、投資判断を補助する分析ツールです。")
 st.caption("これは投資助言ではありません。最終判断は自己責任で行ってください。")
 st.markdown(
     """

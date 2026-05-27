@@ -127,6 +127,7 @@ def calculate_phase1_score(df, fund: dict) -> tuple[int, dict, dict, list[str], 
 
     per = fund.get("per")
     pbr = fund.get("pbr")
+    psr = fund.get("psr")
     if per is not None and per > 40:
         score -= 6; breakdown["バリュエーション"]["score"] -= 12
         caution_factors.append("PERが高く割高感")
@@ -138,6 +139,32 @@ def calculate_phase1_score(df, fund: dict) -> tuple[int, dict, dict, list[str], 
     if pbr is not None and pbr > 5:
         breakdown["バリュエーション"]["score"] -= 4
         caution_factors.append("PBRが高く期待先行の可能性")
+
+    valuation_comments = []
+    if per is not None:
+        if per >= 100:
+            valuation_comments.append("PERは100倍以上でかなり高い水準。高成長期待が強く織り込まれている可能性")
+        elif per >= 50:
+            valuation_comments.append("PERは50〜100倍で高め。成長性とのバランス確認が必要")
+        elif per >= 15:
+            valuation_comments.append("PERは15〜50倍で標準〜やや高め")
+        else:
+            valuation_comments.append("PERは15倍未満で相対的に低め")
+
+    if psr is not None:
+        if psr >= 20:
+            valuation_comments.append("PSRは20倍以上で売上対比でもかなり高評価")
+        elif psr >= 10:
+            valuation_comments.append("PSRは10〜20倍で高成長期待が織り込まれている可能性")
+        else:
+            valuation_comments.append("PSRは10倍未満で比較的落ち着いた水準")
+
+    if (per is not None and per >= 50) or (psr is not None and psr >= 10) or (pbr is not None and pbr > 5):
+        valuation_comments.append("バリュエーション面では慎重確認が必要")
+        valuation_comments.append("利益成長が伴わない場合は下落リスクが大きい")
+
+    if valuation_comments:
+        breakdown["バリュエーション"]["comment"] = " / ".join(valuation_comments)
 
     net_income = fund.get("net_income")
     if net_income is not None and net_income > 0:
