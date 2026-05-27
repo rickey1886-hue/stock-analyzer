@@ -15,7 +15,8 @@ from src.utils.formatting import format_number, format_percent, is_valid_number
 from src.utils.ticker_utils import normalize_ticker
 
 st.set_page_config(page_title="Stock Analyzer", layout="wide")
-st.title("株式投資分析ツール（Phase 1 MVP）")
+st.title("株式投資分析ダッシュボード")
+st.caption("株価・テクニカル・ファンダメンタル・市場環境をもとに、投資判断を補助する分析ツールです。")
 st.caption("これは投資助言ではありません。最終判断は自己責任で行ってください。")
 st.markdown(
     """
@@ -132,13 +133,23 @@ if run:
     long_horizon = horizons.get("長期", {})
 
     short_view = short_horizon.get("view", "データ未取得")
+    if short_view == "データ未取得":
+        short_view = "判定材料不足"
     mid_view = mid_horizon.get("view", "データ未取得")
     long_view = long_horizon.get("view", "データ未取得")
+
+    latest_close = stats.get("latest_close")
+    if not is_valid_number(latest_close):
+        close_series = price_df.get("Close")
+        if close_series is not None:
+            valid_close = close_series.dropna()
+            if not valid_close.empty:
+                latest_close = float(valid_close.iloc[-1])
 
     cards = [
         ("総合判定", f"<span class='{judgment_class(judgment)}'>{judgment}</span>"),
         ("総合スコア", f"{score} / 100"),
-        ("直近終値", format_number(stats["latest_close"], 2)),
+        ("直近終値", format_number(latest_close, 2)),
         ("短期判定", f"<span class='{judgment_class(short_view)}'>{short_view}</span>"),
         ("中期判定", f"<span class='{judgment_class(mid_view)}'>{mid_view}</span>"),
         ("長期判定", f"<span class='{judgment_class(long_view)}'>{long_view}</span>"),
