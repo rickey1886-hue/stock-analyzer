@@ -30,6 +30,7 @@ def _download_close_series(symbol: str, period: str) -> pd.Series | None:
     if "Close" not in data.columns:
         return None
     close = data["Close"].dropna()
+    close = close[close.apply(lambda v: math.isfinite(float(v)) if v is not None else False)]
     if close.empty:
         return None
     return close
