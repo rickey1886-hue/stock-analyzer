@@ -25,6 +25,8 @@ def format_number(value: Any, digits: int = 2) -> str:
 
 
 def format_percent(value: Any, digits: int = 2) -> str:
+    if value in ("データ未取得", "データ確認推奨"):
+        return value
     if not is_valid_number(value):
         return "データ未取得"
     numeric = float(value)
