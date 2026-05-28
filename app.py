@@ -223,17 +223,19 @@ if run:
         if stock_return is None:
             st.write("個別株騰落率が算出できないため比較コメントはデータ未取得")
         else:
-            outperform_count = sum(1 for row in comparison_rows if row["相対強弱"] == "上回る")
-            valid_count = sum(1 for row in comparison_rows if row["相対強弱"] in ["上回る", "下回る", "ほぼ同等"])
-            underperform_count = sum(1 for row in comparison_rows if row["相対強弱"] == "下回る")
+            benchmark_names = {"S&P500", "NASDAQ", "日経平均", "TOPIX"}
+            benchmark_rows = [row for row in comparison_rows if row["比較対象"] in benchmark_names]
+            outperform_count = sum(1 for row in benchmark_rows if row["相対強弱"] == "上回る")
+            valid_count = sum(1 for row in benchmark_rows if row["相対強弱"] in ["上回る", "下回る", "ほぼ同等"])
+            underperform_count = sum(1 for row in benchmark_rows if row["相対強弱"] == "下回る")
             if valid_count == 0:
                 st.write("市場指数比較データ未取得")
             elif outperform_count > valid_count / 2:
-                st.write(f"{ticker}は主要指数比で相対的に強い。{market_comment}。")
+                st.write(f"{ticker}は主要指数比で相対的に強い。分析補助情報として{market_comment}。")
             elif underperform_count > valid_count / 2:
-                st.write(f"{ticker}は指数比では見劣り。{market_comment}。")
+                st.write(f"{ticker}は主要指数比では見劣り。分析補助情報として{market_comment}。")
             else:
-                st.write(f"{ticker}は主要指数比でほぼ同等。{market_comment}。")
+                st.write(f"{ticker}は主要指数比でほぼ同等。分析補助情報として{market_comment}。")
 
     with tab_summary:
         st.subheader("総合判定サマリー")
