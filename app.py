@@ -9,13 +9,15 @@ from src.analysis.technical_analysis import add_technical_indicators
 from src.analysis.valuation_analysis import valuation_comment
 from src.data.fundamental_data import get_fundamental_snapshot
 from src.data.market_data import get_market_environment
+from src.data.news_data import get_news_items
 from src.data.price_data import get_latest_price_stats, get_price_history
 from src.utils.config import PERIOD_OPTIONS
 from src.utils.formatting import format_number, format_percent, is_valid_number
 from src.utils.ticker_utils import normalize_ticker
 
 st.set_page_config(page_title="Stock Analyzer", layout="wide")
-st.title("株式投資分析ツール（Phase 1 MVP）")
+st.title("株式投資分析ダッシュボード")
+st.caption("株価・テクニカル・ファンダメンタル・市場環境をもとに、投資判断を補助する分析ツールです。")
 st.caption("これは投資助言ではありません。最終判断は自己責任で行ってください。")
 st.markdown(
     """
@@ -80,6 +82,10 @@ if run:
 
     with st.spinner("市場環境を取得中..."):
         market_env = get_market_environment(PERIOD_OPTIONS[period_label])
+    try:
+        news_items = get_news_items(ticker, limit=5)
+    except Exception:
+        news_items = []
 
     stock_return = None
     if len(price_df) >= 2:
@@ -132,13 +138,23 @@ if run:
     long_horizon = horizons.get("長期", {})
 
     short_view = short_horizon.get("view", "データ未取得")
+    if short_view == "データ未取得":
+        short_view = "判定材料不足"
     mid_view = mid_horizon.get("view", "データ未取得")
     long_view = long_horizon.get("view", "データ未取得")
+
+    latest_close = stats.get("latest_close")
+    if not is_valid_number(latest_close):
+        close_series = price_df.get("Close")
+        if close_series is not None:
+            valid_close = close_series.dropna()
+            if not valid_close.empty:
+                latest_close = float(valid_close.iloc[-1])
 
     cards = [
         ("総合判定", f"<span class='{judgment_class(judgment)}'>{judgment}</span>"),
         ("総合スコア", f"{score} / 100"),
-        ("直近終値", format_number(stats["latest_close"], 2)),
+        ("直近終値", format_number(latest_close, 2)),
         ("短期判定", f"<span class='{judgment_class(short_view)}'>{short_view}</span>"),
         ("中期判定", f"<span class='{judgment_class(mid_view)}'>{mid_view}</span>"),
         ("長期判定", f"<span class='{judgment_class(long_view)}'>{long_view}</span>"),
@@ -149,8 +165,8 @@ if run:
             unsafe_allow_html=True,
         )
 
-    tab_summary, tab_chart, tab_technical, tab_fundamental, tab_market, tab_reason, tab_data = st.tabs(
-        ["サマリー", "チャート", "テクニカル", "ファンダメンタル", "市場環境", "判定理由・リスク", "データ取得状況"]
+    tab_summary, tab_chart, tab_technical, tab_fundamental, tab_market, tab_news, tab_reason, tab_data = st.tabs(
+        ["サマリー", "チャート", "テクニカル", "ファンダメンタル", "市場環境", "ニュース・材料", "判定理由・リスク", "データ取得状況"]
     )
 
     with tab_chart:
@@ -212,17 +228,28 @@ if run:
         if stock_return is None:
             st.write("個別株騰落率が算出できないため比較コメントはデータ未取得")
         else:
-            outperform_count = sum(1 for row in comparison_rows if row["相対強弱"] == "上回る")
-            valid_count = sum(1 for row in comparison_rows if row["相対強弱"] in ["上回る", "下回る", "ほぼ同等"])
-            underperform_count = sum(1 for row in comparison_rows if row["相対強弱"] == "下回る")
+            benchmark_names = {"S&P500", "NASDAQ", "日経平均", "TOPIX"}
+            benchmark_rows = [row for row in comparison_rows if row["比較対象"] in benchmark_names]
+            outperform_count = sum(1 for row in benchmark_rows if row["相対強弱"] == "上回る")
+            valid_count = sum(1 for row in benchmark_rows if row["相対強弱"] in ["上回る", "下回る", "ほぼ同等"])
+            underperform_count = sum(1 for row in benchmark_rows if row["相対強弱"] == "下回る")
             if valid_count == 0:
                 st.write("市場指数比較データ未取得")
             elif outperform_count > valid_count / 2:
-                st.write(f"{ticker}は主要指数比で相対的に強い。{market_comment}。")
+                st.write(f"{ticker}は主要指数比で相対的に強い。分析補助情報として{market_comment}。")
             elif underperform_count > valid_count / 2:
-                st.write(f"{ticker}は指数比では見劣り。{market_comment}。")
+                st.write(f"{ticker}は主要指数比では見劣り。分析補助情報として{market_comment}。")
             else:
-                st.write(f"{ticker}は主要指数比でほぼ同等。{market_comment}。")
+                st.write(f"{ticker}は主要指数比でほぼ同等。分析補助情報として{market_comment}。")
+
+    with tab_news:
+        st.subheader("ニュース・材料")
+        if not news_items:
+            st.write("ニュースデータ未取得")
+            st.caption("データ取得状況: RSS取得失敗 / 空データ / ネットワークエラー")
+        else:
+            st.caption(f"データ取得状況: {len(news_items)}件取得")
+            st.dataframe(pd.DataFrame(news_items), use_container_width=True)
 
     with tab_summary:
         st.subheader("総合判定サマリー")
