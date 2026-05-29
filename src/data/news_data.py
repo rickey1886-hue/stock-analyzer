@@ -1,74 +1,139 @@
-"""News headline retrieval (Phase 2 step 1)."""
+"""Google News RSS headline retrieval utilities."""
 
 from __future__ import annotations
 
-from email.utils import parsedate_to_datetime
+from typing import Any
 from urllib.parse import quote_plus
-from urllib.request import urlopen
 import xml.etree.ElementTree as ET
 
+import requests
 
-def _safe_text(node: ET.Element | None) -> str:
-    if node is None or node.text is None:
-        return "データ未取得"
-    text = node.text.strip()
-    return text if text else "データ未取得"
-
-
-def _build_query(query: str | None, ticker: str | None, company_name: str | None) -> str:
-    query_parts = []
-    for value in [query, ticker, company_name]:
-        if value is None:
-            continue
-        text = str(value).strip()
-        if text:
-            query_parts.append(text)
-    return " ".join(query_parts).strip()
+NEWS_STATUS_FETCHED = "取得済み"
+NEWS_STATUS_UNAVAILABLE = "ニュースデータ未取得"
+MISSING_VALUE = "データ未取得"
+GOOGLE_NEWS_RSS_URL = "https://news.google.com/rss/search"
+DEFAULT_MAX_ITEMS = 5
+MAX_ITEMS_LIMIT = 5
+REQUEST_TIMEOUT_SECONDS = 8
 
 
-def get_news_items(
-    query: str | None = None,
-    limit: int = 5,
-    ticker: str | None = None,
-    company_name: str | None = None,
-    include_status: bool = False,
-) -> list[dict] | dict:
-    merged_query = _build_query(query=query, ticker=ticker, company_name=company_name)
-    if not merged_query:
-        return {"status": "ニュースデータ未取得", "items": []} if include_status else []
-    safe_limit = max(1, min(5, int(limit)))
-    rss_url = (
-        "https://news.google.com/rss/search?"
-        f"q={quote_plus(merged_query)}&hl=ja&gl=JP&ceid=JP:ja"
-    )
+def _failure(message: str) -> dict:
+    """Return the common failure shape expected by the application."""
+
+    return {
+        "status": NEWS_STATUS_UNAVAILABLE,
+        "items": [],
+        "message": message,
+    }
+
+
+def _safe_text(element: ET.Element | None) -> str:
+    """Extract stripped text from an RSS element with a safe fallback."""
+
+    if element is None or element.text is None:
+        return MISSING_VALUE
+
+    text = element.text.strip()
+    return text if text else MISSING_VALUE
+
+
+def _normalize_query_text(text: str) -> str:
+    """Normalize the search term used for Google News RSS."""
+
+    normalized = text.strip()
+    if normalized.upper().endswith(".T"):
+        normalized = normalized[:-2].strip()
+    return normalized
+
+
+def _build_search_query(ticker: str, company_name: str | None) -> str:
+    """Build a search query, preferring company name over ticker."""
+
+    preferred_query = company_name if company_name and company_name.strip() else ticker
+    return _normalize_query_text(str(preferred_query)) if preferred_query is not None else ""
+
+
+def _normalize_max_items(max_items: int) -> int:
+    """Keep the requested item count within the supported Google News display range."""
+
     try:
-        with urlopen(rss_url, timeout=8) as response:
-            xml_bytes = response.read()
-        root = ET.fromstring(xml_bytes)
-    except Exception:
-        return {"status": "ニュースデータ未取得", "items": []} if include_status else []
+        requested_items = int(max_items)
+    except (TypeError, ValueError):
+        requested_items = DEFAULT_MAX_ITEMS
 
-    items = []
-    for item in root.findall("./channel/item")[:safe_limit]:
-        title = _safe_text(item.find("title"))
-        link = _safe_text(item.find("link"))
-        source = _safe_text(item.find("source"))
-        pub_date_text = _safe_text(item.find("pubDate"))
-        if pub_date_text != "データ未取得":
-            try:
-                pub_date = parsedate_to_datetime(pub_date_text).strftime("%Y-%m-%d %H:%M")
-            except Exception:
-                pub_date = pub_date_text
-        else:
-            pub_date = "データ未取得"
-        items.append(
-            {
-                "title": title,
-                "source": source,
-                "published": pub_date,
-                "link": link,
-            }
-        )
+    return max(1, min(requested_items, MAX_ITEMS_LIMIT))
+
+
+def _parse_news_item(item: ET.Element) -> dict[str, str]:
+    """Convert an RSS item element into the public news item dictionary."""
+
+    return {
+        "title": _safe_text(item.find("title")),
+        "source": _safe_text(item.find("source")),
+        "published": _safe_text(item.find("pubDate")),
+        "link": _safe_text(item.find("link")),
+    }
+
+
+def fetch_company_news(
+    ticker: str,
+    company_name: str | None = None,
+    max_items: int = DEFAULT_MAX_ITEMS,
+) -> dict[str, Any]:
+    """Fetch up to five company news headlines from Google News RSS.
+
+    The function intentionally retrieves only RSS metadata (headline, source,
+    published date, and link). It never fetches article bodies, and all expected
+    network or parsing failures are converted into a safe response dictionary so
+    callers do not need to wrap this function to keep the app running.
+    """
+
+    query = _build_search_query(ticker=ticker, company_name=company_name)
+    if not query:
+        return _failure("検索語が空のためニュースを取得できませんでした。")
+
+    item_limit = _normalize_max_items(max_items)
+    rss_url = (
+        f"{GOOGLE_NEWS_RSS_URL}?"
+        f"q={quote_plus(query)}&hl=ja&gl=JP&ceid=JP:ja"
+    )
+
+    try:
+        response = requests.get(rss_url, timeout=REQUEST_TIMEOUT_SECONDS)
+        response.raise_for_status()
+    except requests.exceptions.Timeout:
+        return _failure("ニュース取得がタイムアウトしました。")
+    except requests.exceptions.RequestException as exc:
+        return _failure(f"ニュース取得中にネットワークエラーが発生しました: {exc}")
+
+    if not response.content:
+        return _failure("ニュースRSSのレスポンスが空でした。")
+
+    try:
+        root = ET.fromstring(response.content)
+    except ET.ParseError as exc:
+        return _failure(f"ニュースRSSの解析に失敗しました: {exc}")
+
+    channel = root.find("channel")
+    if channel is None:
+        return _failure("ニュースRSSの形式が想定と異なります。")
+
+    rss_items = channel.findall("item")
+    if not rss_items:
+        return _failure("ニュースが見つかりませんでした。")
+
+    items = [_parse_news_item(item) for item in rss_items[:item_limit]]
     if not items:
-        return {"status": "ニュースデータ未取得", "items": []} if include_status else []
-    return {"status": "ok", "items": items} if include_status else items
+        return _failure("ニュースが見つかりませんでした。")
+
+    return {
+        "status": NEWS_STATUS_FETCHED,
+        "items": items,
+        "message": "",
+    }
+
+
+if __name__ == "__main__":
+    from pprint import pprint
+
+    pprint(fetch_company_news("AAPL", "Apple Inc.", 5))
